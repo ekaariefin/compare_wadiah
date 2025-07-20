@@ -1,7 +1,6 @@
 import oracledb
 import pandas as pd
-
-from tqdm import tqdm  # pip install tqdm
+from tqdm import tqdm
 import csv
 from datetime import datetime
 from decimal import Decimal
