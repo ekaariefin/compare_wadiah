@@ -1,8 +1,20 @@
+import datetime
 import pandas as pd
+import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.message import EmailMessage
+from config import SMTP_CONFIG
 from tqdm import tqdm
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
+
+report_recipient = [
+    'eka_prasetyo@bcasyariah.co.id'
+]
+
 def parse_float(value):
-    """Konversi string angka ke float, menangani format Indonesia."""
     if isinstance(value, str):
         value = value.replace('.', '').replace(',', '.').strip()
     try:
@@ -10,52 +22,95 @@ def parse_float(value):
     except (ValueError, TypeError):
         return 0.0
 
-def load_and_prepare_data(file1, file2, delimiter1=',', delimiter2 = ';'):
-    """Membaca file CSV dan menyiapkan kolom nomor_seri."""
-    df1 = pd.read_csv(file1, delimiter=delimiter1, dtype=str)
-    df2 = pd.read_csv(file2, delimiter=delimiter2, dtype=str)
+def load_and_prepare_data(file_oracle, file_pg, delimiter1=';', delimiter2=';'):
+    df_oracle = pd.read_csv(file_oracle, delimiter=delimiter1, dtype=str)
+    df_pg = pd.read_csv(file_pg, delimiter=delimiter2, dtype=str)
 
-    if 'nomor_referensi' not in df1.columns:
-        raise KeyError("Kolom 'nomor_referensi' tidak ditemukan di file 1")
-    if df2.shape[1] < 2:
-        raise KeyError("File 2 harus memiliki minimal 2 kolom")
+    # Strip semua kolom dari spasi untuk konsistensi
+    df_oracle.columns = df_oracle.columns.str.strip()
+    df_pg.columns = df_pg.columns.str.strip()
 
-    df1['nomor_seri'] = df1['nomor_referensi'].str[:23]
-    df2 = df2.rename(columns={df2.columns[1]: 'nomor_seri'})
-    df2['nomor_seri'] = df2['nomor_seri'].astype(str)
+    # logging.info(f"Kolom di df_oracle: {df_oracle.columns.tolist()}")
+    # logging.info(f"Top 1 data df_oracle:\n{df_oracle.head(1).to_dict(orient='records')}")
 
-    return df1, df2
+    if 'NOMORSERI' not in df_oracle.columns:
+        raise KeyError("Kolom 'NOMORSERI' tidak ditemukan di file Oracle.")
+    if 'nomor_referensi' not in df_pg.columns:
+        raise KeyError("Kolom 'nomor_referensi' tidak ditemukan di file PG.")
 
-def compare_data(df1, df2):
-    """Membandingkan data berdasarkan nomor_seri."""
-    referensi_map = df1.set_index('nomor_seri')['nomor_referensi'].to_dict()
-    cocok, tidak_cocok = [], []
+    # PG: ambil 23 karakter pertama dari nomor referensi, simpan sebagai 'nomorseri'
+    df_pg['nomorseri'] = df_pg['nomor_referensi'].str[:23]
 
-    for _, row in tqdm(df2.iterrows(), total=len(df2), desc="\U0001F4CA Membandingkan"):
-        row_dict = row.to_dict()
-        nomor_seri = row_dict.get('nomor_seri', '')
-        if nomor_seri in referensi_map:
-            row_dict['nomor_referensi'] = referensi_map[nomor_seri]
+    return df_oracle, df_pg
+
+def compare_data_utils(df_oracle, df_pg):
+    # Normalisasi nama kolom
+    df_oracle.columns = df_oracle.columns.str.strip().str.upper()
+    df_pg.columns = df_pg.columns.str.strip().str.upper()
+
+    # logging.info(f"Header kolom file1_df (Oracle): {df_oracle.columns.tolist()}")
+    # logging.info(f"Header kolom file2_df (Postgres): {df_pg.columns.tolist()}")
+
+    # Validasi kolom
+    if 'NOMORSERI' not in df_oracle.columns:
+        raise KeyError("Kolom 'NOMORSERI' tidak ditemukan di file Oracle.")
+    if 'NOMORSERI' not in df_pg.columns:
+        raise KeyError("Kolom 'NOMORSERI' tidak ditemukan di file Postgres.")
+
+    # Bersihkan dan setel kolom pembanding
+    df_oracle['NOMORSERI'] = df_oracle['NOMORSERI'].astype(str).str.strip()
+    df_pg['NOMORSERI'] = df_pg['NOMORSERI'].astype(str).str.strip()
+
+    set_pg = set(df_pg['NOMORSERI'])
+
+    cocok = []
+    tidak_cocok = []
+
+    for _, row in tqdm(df_oracle.iterrows(), total=len(df_oracle), desc="\U0001F4CA Membandingkan"):
+        nomorseri = str(row.get('NOMORSERI', '')).strip()
+        jurnaldesc = str(row.get('JURNALDESCRIPTION', '')).strip()
+        amount_debit = row.get('AMOUNT_DEBIT', '')
+        amount_credit = row.get('AMOUNT_CREDIT', '')
+
+        status = 'Cocok' if nomorseri in set_pg else 'Tidak Cocok'
+
+        row_dict = {
+            'NOMORSERI': nomorseri,
+            'JURNALDESCRIPTION': jurnaldesc,
+            'AMOUNT_DEBIT': amount_debit,
+            'AMOUNT_CREDIT': amount_credit,
+            'STATUS COMPARE': status
+        }
+
+        if status == 'Cocok':
             cocok.append(row_dict)
         else:
-            row_dict['nomor_referensi'] = ''
             tidak_cocok.append(row_dict)
 
     return cocok, tidak_cocok
 
 def calculate_debit_kredit(rows):
     """Menghitung total debit dan kredit dari list of dicts."""
-    total_debit = sum(parse_float(row.get(' MUTASI DEBET ')) for row in rows)
-    total_kredit = sum(parse_float(row.get(' MUTASI KREDIT ')) for row in rows)
+    total_debit = sum(parse_float(row.get('AMOUNT_DEBIT')) for row in rows)
+    total_kredit = sum(parse_float(row.get('AMOUNT_CREDIT')) for row in rows)
     return total_debit, total_kredit
 
 def render_rows(data, status, display_columns, dummy_if_empty=False):
     """Membuat baris HTML untuk tabel."""
     if data:
-        return ''.join(
-            f"<tr>{''.join(f'<td>{row.get(col, status if col == 'STATUS COMPARE' else '')}</td>' for col in display_columns)}</tr>"
-            for row in data
-        )
+        rows_html = ""
+        for row in data:
+            row_html = "<tr>"
+            for col in display_columns:
+                if col == 'STATUS COMPARE':
+                    val = row.get(col, status)
+                else:
+                    val = row.get(col, '')
+                # Pastikan val di-escape agar aman, tapi untuk sekarang cukup str(val)
+                row_html += f"<td>{val}</td>"
+            row_html += "</tr>"
+            rows_html += row_html
+        return rows_html
     elif dummy_if_empty:
         return f"<tr style='visibility:hidden;'>{''.join(f'<td>{col}</td>' for col in display_columns)}</tr>"
     else:
@@ -63,6 +118,8 @@ def render_rows(data, status, display_columns, dummy_if_empty=False):
 
 def generate_html_table_section(title, data, display_columns, table_id, table_class, status_text='', dummy_if_empty=False):
     """Membuat section tabel HTML."""
+    # logging.info(f"Top 1 data df_oracle:\n{data.head(1).to_dict(orient='records')}")
+    
     rows_html = render_rows(data, status_text, display_columns, dummy_if_empty)
     thead_html = ''.join(f'<th>{col}</th>' for col in display_columns)
 
@@ -80,14 +137,130 @@ def generate_html_table_section(title, data, display_columns, table_id, table_cl
     </div>
     """
 
-def generate_html_report(df1, df2, cocok, tidak_cocok, filename):
+def generate_summary_rows(summary_data):
+    rows = ""
+    for desc, value, _, css_class in summary_data:
+        # Auto tandai merah jika deskripsi mengandung 'Tidak Ditemukan'
+        if "Tidak Ditemukan" in desc:
+            css_class = "text-danger"
+        class_attr = f'class="{css_class}"' if css_class else ""
+        rows += f"<tr><td>{desc}</td><td {class_attr}>{value}</td></tr>\n"
+    return rows
+
+
+def send_summary_email(summary_data, recipient_email, start_date, end_date):
+    def format_date(date_str):
+        """Ubah format dari 'YYYY-MM-DD' ke 'DD-MM-YYYY'."""
+        return datetime.datetime.strptime(date_str, "%Y-%m-%d").strftime("%d-%m-%Y")
+
+    formatted_start = format_date(start_date)
+    formatted_end = format_date(end_date)
+
+    try:
+        if isinstance(recipient_email, list):
+            recipient_str = ', '.join(recipient_email)
+        else:
+            recipient_str = str(recipient_email)
+
+        logging.info("Mengirim summary email ke: %s", recipient_str)
+
+        msg = EmailMessage()
+        msg['Subject'] = 'Laporan Compare Transaksi Tahapan Wadiah iB'
+        msg['From'] = SMTP_CONFIG['mail_sender']
+        msg['To'] = recipient_str
+
+        summary_rows_html = generate_summary_rows(summary_data)
+
+        html_content = f"""
+            <html>
+            <head>
+                <style>
+                    body {{
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        font-size: 13.5px;
+                        color: #212121;
+                        line-height: 1.6;
+                        margin: 0;
+                        padding: 0;
+                    }}
+                    table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 14px;
+                    }}
+                    th, td {{
+                        border: 1px solid #dddddd;
+                        text-align: left;
+                        padding: 6px 10px;
+                        vertical-align: middle;
+                    }}
+                    th {{
+                        background-color: #f1f1f1;
+                        font-weight: 600;
+                        text-align: center;
+                        vertical-align: middle;
+                    }}
+                    .text-danger {{
+                        color: #c62828;
+                        font-weight: bold;
+                    }}
+                    .text-success,
+                    .text-info,
+                    .text-warning {{
+                        color: #212121;
+                        font-weight: normal;
+                    }}
+                </style>
+            </head>
+            <body>
+                <p>Assalamu'alaikum Warahmatullahi Wabarakatuh,</p>
+
+                <p>Berikut kami sampaikan laporan summary perbandingan transaksi produk <strong>Tahapan Wadiah iB</strong>:</p>
+                <p><strong>Periode:</strong> {formatted_start} s.d. {formatted_end}</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Keterangan</th>
+                            <th>Hasil Compare</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {summary_rows_html}
+                    </tbody>
+                </table>
+
+                <p>Terima kasih atas perhatian dan kerja samanya.</p>
+
+                <p>Wassalamu'alaikum Warahmatullahi Wabarakatuh.</p>
+
+                <br>
+                <p>Regards,<br><strong>Tim IT Core Department</strong></p>
+            </body>
+            </html>
+        """
+
+        msg.set_content("Berikut adalah laporan summary perbandingan dalam format HTML.")
+        msg.add_alternative(html_content, subtype='html')
+
+        with smtplib.SMTP(SMTP_CONFIG['mail_host'], SMTP_CONFIG['mail_port']) as server:
+            server.starttls()
+            server.login(SMTP_CONFIG['mail_sender'], SMTP_CONFIG['mail_password'])
+            server.send_message(msg)
+
+        logging.info("✅ Summary email berhasil dikirim.")
+
+    except Exception as e:
+        logging.error("❌ Gagal mengirim email: %s", str(e))
+
+
+def generate_html_report(df_pg, df_oracle, cocok, tidak_cocok, filename, start_date, end_date):
     """Membangun dan menyimpan laporan HTML."""
-    total_1, total_2 = len(df1), len(df2)
+    total_1, total_2 = len(df_pg), len(df_oracle)
     total_found, total_not_found = len(cocok), len(tidak_cocok)
 
     display_columns = [
-        'nomor_referensi', 'nomor_seri', 'KETERANGAN JURNAL',
-        ' MUTASI DEBET ', ' MUTASI KREDIT ', 'STATUS COMPARE'
+        'NOMORSERI', 'JURNALDESCRIPTION', 'AMOUNT_DEBIT', 'AMOUNT_CREDIT', 'STATUS COMPARE'
     ]
 
     total_debit_cocok, total_kredit_cocok = calculate_debit_kredit(cocok)
@@ -104,9 +277,6 @@ def generate_html_report(df1, df2, cocok, tidak_cocok, filename):
         ("Total Kredit Tidak Ditemukan", f"Rp {total_kredit_tidak:,.2f}", "warning", "text-warning")
     ]
 
-    summary_row_1 = summary_data[:4]
-    summary_row_2 = summary_data[4:]
-
     def render_summary_row(data):
         return ''.join([
             f"""
@@ -121,8 +291,8 @@ def generate_html_report(df1, df2, cocok, tidak_cocok, filename):
         ])
 
     summary_cards_html = f"""
-        <div class='summary-row'>{render_summary_row(summary_row_1)}</div>
-        <div class='summary-row'>{render_summary_row(summary_row_2)}</div>
+        <div class='summary-row'>{render_summary_row(summary_data[:4])}</div>
+        <div class='summary-row'>{render_summary_row(summary_data[4:])}</div>
     """
 
     found_section = generate_html_table_section(
@@ -135,6 +305,19 @@ def generate_html_report(df1, df2, cocok, tidak_cocok, filename):
         table_id="notFoundTable", table_class="danger", status_text="Tidak Cocok",
         dummy_if_empty=True
     )
+
+    try:
+        logging.info("Mengirim summary email ke: %s", ', '.join(report_recipient))
+        send_summary_email(
+            summary_data=summary_data,
+            recipient_email=report_recipient,
+            start_date=start_date,
+            end_date=end_date
+        )
+        logging.info("Summary email berhasil dikirim.")
+    except Exception as e:
+        logging.error("❌ Gagal mengirim email: %s", str(e))
+
 
     html = f"""<!DOCTYPE html>
 <html lang='id'>
@@ -172,6 +355,8 @@ def generate_html_report(df1, df2, cocok, tidak_cocok, filename):
 </body>
 </html>
 """
+    
 
     with open(filename, 'w', encoding='utf-8') as f:
         f.write(html)
+

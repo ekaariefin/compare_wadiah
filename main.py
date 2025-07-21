@@ -5,35 +5,41 @@ from datetime import datetime
 from journal_pg import fetch_xip_data
 from journal_ibank import get_oracle_data
 from journal_compare import analyzed
-# File: main.py
-start_date = '2023-01-01' 
-end_date = '2025-01-01'
 
-# Batch ID
-# batch_id = uuid.uuid4()
-batch_id = "46126c6c-fb6a-45ef-8f26-0cefafef151c"
+start_date = '2024-11-01'
+end_date = '2024-12-01'
 
-# Logging config
+# BATCH_ID = str(uuid.uuid4())
+BATCH_ID = 'e27e2fc9-46af-4f2a-a9d3-899e493df5d9'
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 
+def main():
+    analyzed(BATCH_ID, start_date, end_date)
 
-if __name__ == "__main__":
-    # fetch data from PostgreSQL and Oracle
-    analyzed(str(batch_id))
-    # get_oracle_data(start_date, end_date, str(batch_id))
+    # # Step 1: Ambil data dari Oracle
+    # get_oracle_data(start_date, end_date, BATCH_ID)
+
+    # # Step 2: Ambil data dari PostgreSQL
     # data = fetch_xip_data(start_date, end_date)
     # if data:
     #     df = pd.DataFrame(data)
 
-    #     # Buat nama file CSV dengan tanggal dan waktu
-    #     filename = f"pg_{batch_id}.csv"
+    #     # Tambahkan kolom NOMOR_SERI (potongan 23 karakter dari nomor_referensi)
+    #     if 'nomor_referensi' in df.columns:
+    #         df['NOMOR_SERI'] = df['nomor_referensi'].astype(str).str[:23]
+    #     else:
+    #         logging.warning("Kolom 'nomor_referensi' tidak ditemukan pada data PostgreSQL.")
 
-    #     # Ekspor ke CSV
-    #     df.to_csv(filename, index=False, encoding='utf-8-sig')
-    #     logging.info(f"Data berhasil diekspor ke file: {filename}")
+    #     filename = f"pg_{BATCH_ID}.csv"
+    #     df.to_csv(filename, index=False, sep=';', encoding='utf-8-sig')
+    #     logging.info(f"Data PostgreSQL berhasil diekspor ke file: {filename}")
 
-    #     # Memulai Proses Compare
-    #     logging.info(f"Memulai Proses Compare...")
-
+    #     # Step 3: Proses Compare
+    #     logging.info("Memulai proses perbandingan data...")
+    #     analyzed(BATCH_ID)
     # else:
-    #     logging.warning("Tidak ada data untuk diekspor.")
+    #     logging.warning("Tidak ada data PostgreSQL untuk diekspor.")
+
+if __name__ == "__main__":
+    main()
