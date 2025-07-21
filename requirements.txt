@@ -4,13 +4,17 @@ cffi==1.17.1
 charset-normalizer==3.4.2
 colorama==0.4.6
 cryptography==45.0.5
+docopt==0.6.2
 idna==3.10
 iniconfig==2.1.0
+Jinja2==3.1.6
+MarkupSafe==3.0.2
 numpy==2.3.1
 oracledb==3.2.0
 packaging==25.0
 pandas==2.3.1
 paramiko==3.5.1
+pipreqs==0.4.13
 pluggy==1.6.0
 psycopg2==2.9.10
 pycparser==2.22
@@ -27,3 +31,4 @@ tqdm==4.67.1
 tzdata==2025.2
 urllib3==2.5.0
 uuid==1.30
+yarg==0.1.10
