@@ -77,7 +77,7 @@ def fetch_xip_data(start_date, end_date) -> List[dict]:
                     FROM account_created a
                     JOIN gl_posting g ON g.account_id = a.account_id
                     JOIN event_history_external e ON e.event_id::text = g.event_id::text
-                    WHERE a.product_id = 'tahapan_wadiah_ib'
+                    WHERE (a.product_id = 'tahapan_wadiah_ib' or a.product_id = 'rtjh')
                     AND e.request_datetime BETWEEN %s AND %s
 
                     UNION ALL
@@ -98,7 +98,7 @@ def fetch_xip_data(start_date, end_date) -> List[dict]:
                     FROM account_created a
                     JOIN gl_posting g ON g.account_id = a.account_id
                     JOIN event_history_externals e ON e.event_id::text = g.event_id::text
-                    WHERE a.product_id = 'tahapan_wadiah_ib'
+                    WHERE (a.product_id = 'tahapan_wadiah_ib' or a.product_id = 'rtjh')
                     AND e.request_datetime BETWEEN %s AND %s
 
                 ) AS combined_result
