@@ -30,6 +30,7 @@ SESSID_CACHE = {
 def fetch_xip_data(start_date, end_date) -> List[dict]:
     result = []
 
+
     try:
         with SSHTunnelForwarder(
             (pgcon['ssh_host'], pgcon['ssh_port']),
