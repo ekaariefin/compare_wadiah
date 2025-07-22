@@ -14,19 +14,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List
 import pandas as pd
+from config import POSTGRES_CONFIG
 
-# Jumphost dan RDS
-JUMPHOST_IP = '10.31.1.221'
-JUMPHOST_PORT = 22
-JUMPHOST_USER = 'monitoring-app-dev'
-JUMPHOST_PASSWORD = 'Syariah061820251012'
-
-RDS_HOST = 'xip-aurora-db-124495977855.cluster-czpgxhhclhau.ap-southeast-3.rds.amazonaws.com'
-RDS_PORT = 8097
-RDS_DBNAME = 'dataprods-bcas'
-RDS_1B_DBNAME = 'dbuat-1b-bcas'
-RDS_USER = 'superman'
-RDS_PASSWORD = 'Syariah@1'
+pgcon = POSTGRES_CONFIG
 
 # Logging config
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
@@ -42,10 +32,10 @@ def fetch_xip_data(start_date, end_date) -> List[dict]:
 
     try:
         with SSHTunnelForwarder(
-            (JUMPHOST_IP, JUMPHOST_PORT),
-            ssh_username=JUMPHOST_USER,
-            ssh_password=JUMPHOST_PASSWORD,
-            remote_bind_address=(RDS_HOST, RDS_PORT),
+            (pgcon['ssh_host'], pgcon['ssh_port']),
+            ssh_username=pgcon['ssh_username'],
+            ssh_password=pgcon['ssh_password'],
+            remote_bind_address=(pgcon['db_host'], pgcon['db_port']),
             local_bind_address=('127.0.0.1', 5433)
         ) as tunnel:
             logging.info("SSH Tunnel aktif.")
@@ -53,9 +43,9 @@ def fetch_xip_data(start_date, end_date) -> List[dict]:
             conn = psycopg2.connect(
                 host='127.0.0.1',
                 port=5433,
-                database=RDS_DBNAME,
-                user=RDS_USER,
-                password=RDS_PASSWORD
+                database=pgcon['db_name'],
+                user=pgcon['db_user'],
+                password=pgcon['db_password']
             )
             cur = conn.cursor()
 
